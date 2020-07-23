@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Service
+ServiceTypes=Krita/PythonPlugin
+X-KDE-Library=ChromaticAberration
+X-Python-2-Compatible=false
+X-Krita-Manual=chromaberration_plugin_manual.html
+Name=Chromatic Aberration
+Comment=Controllable chromatic aberration filter.
