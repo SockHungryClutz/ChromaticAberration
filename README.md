@@ -4,13 +4,13 @@ Plugin to apply adjustable chromatic aberration effect to a layer
 
 ## How to Install
 
-1 Open Krita, go to Settings->Manage Resources...->Open Resource Folder
-2 Open the pykrita folder inside the folder that pops up
-3 Download this repository and save the files and folders exactly as they are to the pykrita folder
-4 Close and reopen Krita
-5 Go to Settings->Configure Krita->Python Plugin Manager
-6 Scroll down and enable Chromatic Aberration, click OK to save
-7 Close and reopen Krita again
+ 1. Open Krita, go to Settings->Manage Resources...->Open Resource Folder
+ 2. Open the pykrita folder inside the folder that pops up
+ 3. Download this repository and save the files and folders exactly as they are to the pykrita folder
+ 4. Close and reopen Krita
+ 5. Go to Settings->Configure Krita->Python Plugin Manager
+ 6. Scroll down and enable Chromatic Aberration, click OK to save
+ 7. Close and reopen Krita again
 
 ## How to Use
 
