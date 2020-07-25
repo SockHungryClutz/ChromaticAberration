@@ -2,6 +2,8 @@
 
 Plugin to apply adjustable chromatic aberration effect to a layer
 
+[Example Image of Effects](https://i.imgur.com/AYb7ViR.png)
+
 ## How to Install
 
  1. Open Krita, go to Settings->Manage Resources...->Open Resource Folder
@@ -16,6 +18,8 @@ Plugin to apply adjustable chromatic aberration effect to a layer
 
 With an open document active, select a layer you want to apply the effect to, then click Tools->Scripts->Chromatic Aberration  
 This will pop open a window with options to control the effect before applying:
+
+[Default Look of the User Interface](https://i.imgur.com/SH3f7my.png)
 
 * Shape and Direction:
   * Radial - Effect starts at the center and becomes more powerful at the edges
