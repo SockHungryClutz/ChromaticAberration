@@ -13,7 +13,8 @@ class MainDialog(QDialog):
         self.uiController = uiController
 
     def closeEvent(self, event):
-        pass
+        self.uiController.saveSettings()
+        event.accept()
 
 class UIController(object):
     def __init__(self):
@@ -23,7 +24,8 @@ class UIController(object):
         self.buttonBox = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, self.mainWidget)
         self.mainWidget.setWindowModality(Qt.WindowModal)
 
-    def initialize(self):
+    def initialize(self, parent):
+        self.parent = parent
         self.buttonBox.accepted.connect(self.applyChanges)
         self.buttonBox.rejected.connect(self.mainWidget.reject)
 
@@ -44,19 +46,31 @@ class UIController(object):
             self.doNotSave = False
         vbox.addWidget(self.buttonBox)
 
+        self.readSettings()
+
         self.mainWidget.setWindowTitle("Chromatic Aberration")
-        self.mainWidget.setGeometry(QRect(600, 200, 400, 200))
         self.mainWidget.setSizeGripEnabled(True)
         self.mainWidget.show()
         self.mainWidget.activateWindow()
 
     def applyChanges(self):
         if not self.doNotSave:
+            self.buttonBox.button(QDialogButtonBox.Ok).setEnabled(False)
+            self.buttonBox.button(QDialogButtonBox.Ok).repaint()
             doc = Krita.instance().activeDocument()
             curNode = doc.activeNode().duplicate()
             curNode.setName(curNode.name() + " - duplicate")
             resultData = self.filterWidget.applyFilter(curNode.projectionPixelData(0, 0, doc.width(), doc.height()), (doc.width(), doc.height()))
             curNode.setPixelData(resultData, 0, 0, doc.width(), doc.height())
-            doc.rootNode().addChildNode(curNode, None)
+            doc.rootNode().addChildNode(curNode, doc.activeNode())
             doc.refreshProjection()
         self.mainWidget.accept()
+
+    def saveSettings(self):
+        rect = self.mainWidget.geometry()
+        self.parent.settings.setValue("geometry", rect)
+        self.parent.settings.sync()
+
+    def readSettings(self):
+        rect = self.parent.settings.value("geometry", QRect(600, 200, 400, 200))
+        self.mainWidget.setGeometry(rect)

@@ -6,7 +6,7 @@ All other options are locked for now, as this is based on physical
 cameras as far as I know.
 """
 from PyQt5.QtCore import Qt
-from PyQt5.QtWidgets import QWidget, QLabel, QRadioButton, QButtonGroup, QDial, QSlider, QVBoxLayout
+from PyQt5.QtWidgets import QWidget, QLabel, QRadioButton, QButtonGroup, QDial, QSlider, QCheckBox, QVBoxLayout
 import math
 
 # Helper functions for vector math and color sampling
@@ -30,7 +30,8 @@ def lenVect(vect):
     return math.sqrt((vect[0] ** 2) + (vect[1] ** 2))
 
 # Get a color sample at some coordinate, works with float coords using bilinear
-def sampleAt(coords, imgData, imgSize):
+# Or skip bilinear interpolation for speedup
+def sampleAt(coords, interp, imgData, imgSize):
     # clamp to image bounds
     x = max(0.0, min(coords[0], imgSize[0]-1))
     y = max(0.0, min(coords[1], imgSize[1]-1))
@@ -39,15 +40,17 @@ def sampleAt(coords, imgData, imgSize):
     ry = y % 1
     x = math.floor(x)
     y = math.floor(y)
-    # blend colors between 4 pixels to get the final result (bilinear)
+
     baseColor = getColorAtIndex((y * imgSize[0]) + x, imgData)
-    if ry > 0.00001:
-        baseColor = addVect(scaleVect(baseColor, 1.0-ry), scaleVect(getColorAtIndex(((y+1)*imgSize[0])+x, imgData), ry))
-    if rx > 0.00001:
-        color2 = getColorAtIndex((y * imgSize[0]) + x + 1, imgData)
+    if interp:
+        # blend colors between 4 pixels to get the final result (bilinear)
         if ry > 0.00001:
-            color2 = addVect(scaleVect(color2, (1.0-ry)), scaleVect(getColorAtIndex(((y+1)*imgSize[0])+x+1, imgData), ry))
-        baseColor = addVect(scaleVect(baseColor, (1-rx)), scaleVect(color2, rx))
+            baseColor = addVect(scaleVect(baseColor, 1.0-ry), scaleVect(getColorAtIndex(((y+1)*imgSize[0])+x, imgData), ry))
+        if rx > 0.00001:
+            color2 = getColorAtIndex((y * imgSize[0]) + x + 1, imgData)
+            if ry > 0.00001:
+                color2 = addVect(scaleVect(color2, (1.0-ry)), scaleVect(getColorAtIndex(((y+1)*imgSize[0])+x+1, imgData), ry))
+            baseColor = addVect(scaleVect(baseColor, (1-rx)), scaleVect(color2, rx))
     return baseColor
 
 # Widget for chromatic aberration effect
@@ -60,6 +63,7 @@ class ChromAbWidget(QWidget):
         self.isShapeRadial = True
         self.isFalloffExp = True
         self.direction = 100
+        self.interpolate = False
 
         self.shapeInfo = QLabel("Shape and Direction:", self)
         self.shapeChoice = QButtonGroup(self)
@@ -99,6 +103,9 @@ class ChromAbWidget(QWidget):
         self.deadzone.setRange(0, 100)
         self.deadzone.setValue(5)
         self.deadzone.valueChanged.connect(self.updateDead)
+        
+        self.biFilter = QCheckBox("Bilinear Interpolation (slow, but smooths colors)", self)
+        self.biFilter.stateChanged.connect(self.updateInterp)
 
         vbox = QVBoxLayout()
         vbox.addWidget(self.shapeInfo)
@@ -112,6 +119,7 @@ class ChromAbWidget(QWidget):
         vbox.addWidget(self.foBtn2)
         vbox.addWidget(self.deadInfo)
         vbox.addWidget(self.deadzone)
+        vbox.addWidget(self.biFilter)
 
         self.setLayout(vbox)
         self.show()
@@ -140,6 +148,12 @@ class ChromAbWidget(QWidget):
     def updateDial(self, value):
         self.direction = value
 
+    def updateInterp(self, state):
+        if state == Qt.Checked:
+            self.interpolate = True
+        else:
+            self.interpolate = False
+
     # Return the new color of the pixel at the specified index
     def applyOnePixel(self, coords, imgData, imgSize):
         baseColor = getColorAtIndex((coords[1] * imgSize[0]) + coords[0], imgData)
@@ -165,14 +179,20 @@ class ChromAbWidget(QWidget):
                     displace = scaleVect(displace, lenVect(displace))
                 # scale vector to final length based on max displacement
                 displace = scaleVect(displace, self.maxD)
+                # return immediately if vector is insignificant
+                if lenVect(displace) < 0.01:
+                    return baseColor
         # blend original green channel with blue and red from other pixels
-        redChannel = sampleAt(addVect(coords, displace), imgData, imgSize)
-        blueChannel = sampleAt(addVect(coords, scaleVect(displace, -1)), imgData, imgSize)
-        return [redChannel[0], baseColor[1], blueChannel[2], baseColor[3]]
+        redChannel = sampleAt(addVect(coords, displace), self.interpolate, imgData, imgSize)
+        blueChannel = sampleAt(addVect(coords, scaleVect(displace, -1)), self.interpolate, imgData, imgSize)
+        # blend transparency
+        transparent = (redChannel[3] / 3) + (blueChannel[3] / 3) + (baseColor[3] / 3)
+        return [redChannel[0], baseColor[1], blueChannel[2], transparent]
 
     # Iterate over the image applying the filter
     def applyFilter(self, imgData, imgSize):
-        newData = []
+        # preallocate to save time
+        newData = [0] * (imgSize[0] * imgSize[1])
         idx = 0
         while idx < imgData.length():
             # convert to x,y coordinates
@@ -180,6 +200,6 @@ class ChromAbWidget(QWidget):
             newPixel = self.applyOnePixel(coords, imgData, imgSize)
             for i in range(4):
                 # truncate to int
-                newData.append(int(newPixel[i]))
+                newData[idx + i] = int(newPixel[i])
             idx += 4
         return bytes(newData)
