@@ -19,7 +19,7 @@ Plugin to apply adjustable chromatic aberration effect to a layer
 With an open document active, select a layer you want to apply the effect to, then click Tools->Scripts->Chromatic Aberration  
 This will pop open a window with options to control the effect before applying:
 
-![Default Look of the User Interface](https://i.imgur.com/SH3f7my.png)
+![Default Look of the User Interface](https://i.imgur.com/iyW9Lt2.png)
 
 * Shape and Direction:
   * Radial - Effect starts at the center and becomes more powerful at the edges
@@ -30,11 +30,18 @@ This will pop open a window with options to control the effect before applying:
   * Exponential Falloff - (Radial shape only) The effect is strong at the edges, but quickly loses strength towards the center
   * Linear Falloff - (Radial shape only) The effect gradually gets less powerful towards the center
 * Deadzone - (Radial shape only) Percentage of the screen that will not be affected by the filter, staring at the center. Adjust this if the center of the image needs to stay in focus.
+* Bilinear Interpolation - Checking this option will make the plugin run slightly slower, but will make edges created by the effect smoother and less aliased.
+* Number of Worker Threads (FOR ADVANCED USERS) - As the warning says, this option is for users who know what their CPU is capable of. Larger values will apply the effect faster on very large images, but if the value exceeds the number of threads your CPU can reasonably handle the process will take longer. The default value of 4 will work well on the vast majority of CPUs that can handle Krita.
 
 Once the effect is applied it will be placed on a new layer as a modified clone of the previously selected layer, the original layer is preserved.
 
 ### Extra Notes
 
-Since this is a plugin, it runs single-threaded inside a python interpreter, therefore it is **much** slower than regular filters. To give a sense of how slow, it takes between 5 - 15 seconds to apply the filter to a 540x540 image depending on the settings (larger deadzone helps it run faster). It's expected to run at O(n) complexity, where n is the number of pixels in an image. This slowness is why I decided against adding a preview, just remember your settings, delete the new layer, and try again.
+This plugin relies on a shared C library for speeding up the computationally expensive parts. The source code for the C libraries is included in the `src` folder and has been precompiled for 32 and 64 bit versions of Windows, Mac OS, and Linux installations of Python. The source code can be compiled using gcc and the below commands:
 
-This is my first plugin for Krita, and I know the user interface could use more polish, but it's good enough for me to use, and I'm not sure how many other people will even use this, so it may not be worth the effort to improve. This plugin would be better suited as a filter, both in terms of organization and performance, but for now, this is good enough. Again, effort put in vs how useful the result is, if it's worth making this as a filter I'll look into it.
+```
+gcc -shared -m32 -o ChromaticAberration_32.so -fPIC ChromaticAberration.c Utils.c
+gcc -shared -o ChromaticAberration_64.so -fPIC ChromaticAberration.c Utils.c
+```
+
+Work on this plugin is more or less complete, there are a few niceties that could be added, but I will be putting those as well as a lot more features into a new Krita plugin later. I plan on making this part of a bigger plugin with more visual effects as I get the time to work on it. Once that plugin is released, this repository will effectively be outdated.

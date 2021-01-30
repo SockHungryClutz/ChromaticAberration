@@ -1,57 +1,29 @@
 """
 ChromaticAberrationWidget.py
 Adds a widget and functionality for applying chromatic aberration
-to an image. The max displacement and deadzone can be configured.
-All other options are locked for now, as this is based on physical
-cameras as far as I know.
+to an image. A few properties can be configured.
 """
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QWidget, QLabel, QRadioButton, QButtonGroup, QDial, QSlider, QCheckBox, QVBoxLayout
-import math
+from ctypes import *
+from threading import Thread
+from . import LibHandler
 
-# Helper functions for vector math and color sampling
-# Get color data as a list(4) based on the index
-def getColorAtIndex(idx, imgData):
-    idx2 = idx*4
-    # convert to int before returning, simplifies math and conversions
-    return [byte2Int(imgData[idx2]), byte2Int(imgData[idx2+1]), byte2Int(imgData[idx2+2]), byte2Int(imgData[idx2+3])]
+# Structures for C functions
+class Coords(Structure):
+    _fields_ = [("x", c_longlong),
+                ("y", c_longlong)]
 
-def byte2Int(byt):
-    return int.from_bytes(byt, byteorder='little', signed=False)
+class RadialFilterData(Structure):
+    _fields_ = [("power", c_int),
+                ("deadzone", c_int),
+                ("expFalloff", c_char),
+                ("biFilter", c_char)]
 
-# numpy isn't really an option if I want to share this
-def scaleVect(vect, scalar):
-    return [i * scalar for i in vect]
-
-def addVect(vect1, vect2):
-    return [vect1[i] + vect2[i] for i in range(len(vect1))]
-
-def lenVect(vect):
-    return math.sqrt((vect[0] ** 2) + (vect[1] ** 2))
-
-# Get a color sample at some coordinate, works with float coords using bilinear
-# Or skip bilinear interpolation for speedup
-def sampleAt(coords, interp, imgData, imgSize):
-    # clamp to image bounds
-    x = max(0.0, min(coords[0], imgSize[0]-1))
-    y = max(0.0, min(coords[1], imgSize[1]-1))
-    # get offset from exact pixel
-    rx = x % 1
-    ry = y % 1
-    x = math.floor(x)
-    y = math.floor(y)
-
-    baseColor = getColorAtIndex((y * imgSize[0]) + x, imgData)
-    if interp:
-        # blend colors between 4 pixels to get the final result (bilinear)
-        if ry > 0.00001:
-            baseColor = addVect(scaleVect(baseColor, 1.0-ry), scaleVect(getColorAtIndex(((y+1)*imgSize[0])+x, imgData), ry))
-        if rx > 0.00001:
-            color2 = getColorAtIndex((y * imgSize[0]) + x + 1, imgData)
-            if ry > 0.00001:
-                color2 = addVect(scaleVect(color2, (1.0-ry)), scaleVect(getColorAtIndex(((y+1)*imgSize[0])+x+1, imgData), ry))
-            baseColor = addVect(scaleVect(baseColor, (1-rx)), scaleVect(color2, rx))
-    return baseColor
+class LinearFilterData(Structure):
+    _fields_ = [("power", c_int),
+                ("direction", c_int),
+                ("biFilter", c_char)]
 
 # Widget for chromatic aberration effect
 class ChromAbWidget(QWidget):
@@ -64,6 +36,7 @@ class ChromAbWidget(QWidget):
         self.isFalloffExp = True
         self.direction = 100
         self.interpolate = False
+        self.numThreads = 4
 
         self.shapeInfo = QLabel("Shape and Direction:", self)
         self.shapeChoice = QButtonGroup(self)
@@ -107,6 +80,12 @@ class ChromAbWidget(QWidget):
         self.biFilter = QCheckBox("Bilinear Interpolation (slow, but smooths colors)", self)
         self.biFilter.stateChanged.connect(self.updateInterp)
 
+        self.threadInfo = QLabel("Number of Worker Threads (FOR ADVANCED USERS): 4", self)
+        self.workThreads = QSlider(Qt.Horizontal, self)
+        self.workThreads.setRange(1, 64)
+        self.workThreads.setValue(4)
+        self.workThreads.valueChanged.connect(self.updateThread)
+
         vbox = QVBoxLayout()
         vbox.addWidget(self.shapeInfo)
         vbox.addWidget(self.shapeBtn1)
@@ -120,6 +99,8 @@ class ChromAbWidget(QWidget):
         vbox.addWidget(self.deadInfo)
         vbox.addWidget(self.deadzone)
         vbox.addWidget(self.biFilter)
+        vbox.addWidget(self.threadInfo)
+        vbox.addWidget(self.workThreads)
 
         self.setLayout(vbox)
         self.show()
@@ -154,52 +135,47 @@ class ChromAbWidget(QWidget):
         else:
             self.interpolate = False
 
-    # Return the new color of the pixel at the specified index
-    def applyOnePixel(self, coords, imgData, imgSize):
-        baseColor = getColorAtIndex((coords[1] * imgSize[0]) + coords[0], imgData)
-        # linear direction is easy
-        if not self.isShapeRadial:
-            displace = [-1*math.sin(math.radians(self.direction)), math.cos(math.radians(self.direction))]
-            displace = scaleVect(displace, self.maxD)
-        else:
-            # get direction vector
-            floatDeadzone = self.deadZ / 100
-            center = ((imgSize[0]-1)/2, (imgSize[1]-1)/2)
-            displace = addVect(coords, scaleVect(center, -1))
-            # normalize, length of displace will be [0,1]
-            displace = scaleVect(displace, 1/lenVect(center))
-            # if inside the deadzone, return original color
-            if lenVect(displace) <= floatDeadzone:
-                return baseColor
-            else:
-                # scale vector to 0 at the edge of deadzone, 1 at edge of screen
-                displace = scaleVect(displace, (lenVect(displace) - floatDeadzone) * (1/(1-floatDeadzone)))
-                # use exponential falloff
-                if self.isFalloffExp:
-                    displace = scaleVect(displace, lenVect(displace))
-                # scale vector to final length based on max displacement
-                displace = scaleVect(displace, self.maxD)
-                # return immediately if vector is insignificant
-                if lenVect(displace) < 0.01:
-                    return baseColor
-        # blend original green channel with blue and red from other pixels
-        redChannel = sampleAt(addVect(coords, displace), self.interpolate, imgData, imgSize)
-        blueChannel = sampleAt(addVect(coords, scaleVect(displace, -1)), self.interpolate, imgData, imgSize)
-        # blend transparency
-        transparent = (redChannel[3] / 3) + (blueChannel[3] / 3) + (baseColor[3] / 3)
-        return [redChannel[0], baseColor[1], blueChannel[2], transparent]
+    def updateThread(self, value):
+        self.threadInfo.setText("Number of Worker Threads (FOR ADVANCED USERS): " + str(value))
+        self.numThreads = value
 
-    # Iterate over the image applying the filter
+    # Call into C library to process the image
     def applyFilter(self, imgData, imgSize):
-        # preallocate to save time
-        newData = [0] * (imgSize[0] * imgSize[1])
+        newData = create_string_buffer(imgSize[0] * imgSize[1] * 4)
+        
+        dll = LibHandler.GetSharedLibrary()
+        dll.ApplyLinearAberration.argtypes = [c_longlong, c_longlong, LinearFilterData, Coords, c_void_p, c_void_p]
+        dll.ApplyRadialAberration.argtypes = [c_longlong, c_longlong, RadialFilterData, Coords, c_void_p, c_void_p]
+        
+        imgCoords = Coords(imgSize[0], imgSize[1])
+        # python makes it hard to get a pointer to existing buffers for some reason
+        cimgData = c_char * len(imgData)
+        threadPool = []
+        interp = 0
+        if self.interpolate:
+                interp = 1
+        if self.isShapeRadial:
+            falloff = 0
+            if self.isFalloffExp:
+                falloff = 1
+            filterSettings = RadialFilterData(self.maxD, self.deadZ, falloff, interp)
+        else:
+            filterSettings = LinearFilterData(self.maxD, self.direction, interp)
         idx = 0
-        while idx < imgData.length():
-            # convert to x,y coordinates
-            coords = ((idx/4) % imgSize[0], (idx/4) // imgSize[0])
-            newPixel = self.applyOnePixel(coords, imgData, imgSize)
-            for i in range(4):
-                # truncate to int
-                newData[idx + i] = int(newPixel[i])
-            idx += 4
+        for i in range(self.numThreads):
+            numPixels = (imgSize[0] * imgSize[1]) // self.numThreads
+            if i == self.numThreads - 1:
+                numPixels = (imgSize[0] * imgSize[1]) - idx # Give the last thread the remainder
+            if self.isShapeRadial:
+                workerThread = Thread(target=dll.ApplyRadialAberration, args=(idx, numPixels, filterSettings,
+                                        imgCoords, cimgData.from_buffer(imgData), byref(newData),))
+            else:
+                workerThread = Thread(target=dll.ApplyLinearAberration, args=(idx, numPixels, filterSettings,
+                                        imgCoords, cimgData.from_buffer(imgData), byref(newData),))
+            threadPool.append(workerThread)
+            threadPool[i].start()
+            idx += numPixels
+        # Join threads to finish
+        for i in range(self.numThreads):
+            threadPool[i].join()
         return bytes(newData)
