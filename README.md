@@ -1,3 +1,10 @@
+# !!THIS PLUGIN HAS BEEN REPLACED!!
+
+***Please use the Krita VFX plugin instead, it is currently suported and includes more neat filters!***  
+https://github.com/SockHungryClutz/KritaVFX
+
+-----
+
 # Chromatic Aberration Plugin - Krita 4
 
 Plugin to apply adjustable chromatic aberration effect to a layer
